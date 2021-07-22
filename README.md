@@ -1,5 +1,5 @@
 # [prawL](https://prawl.xyz/discord) (2021-2023?)
-100% open source brawlhalla client coming soon... (if i actually get some free time or if yall want to help out, thatll be amazing)
+100% open source brawlhalla client coming soon... (if i actually get some free time or if yall want to help out, join the discord)
 
 # features and plans
 - combo scripting and importing
