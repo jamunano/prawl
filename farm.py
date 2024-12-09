@@ -7,9 +7,11 @@ import win32con
 import win32gui
 import dearpygui.dearpygui as dpg
 
+# global vars cuz im lazy yippee
 hwnd = win32gui.FindWindow(None, 'Brawlhalla')
 total_games = 0
 
+# timer thingy
 class Timer:
     def __init__(self):
         self.initial_time = 0
@@ -39,27 +41,36 @@ class Timer:
             
             if self.remaining_time == 0 and self.running:
                 if dpg.get_value('timer_sound'):
-                    winsound.Beep(500, 100)
+                    winsound.Beep(dpg.get_value('beep_frequency'), dpg.get_value('beep_duration'))
                 total_games += 1
                 self.remaining_time = self.initial_time
 
     def start_sequence(self):
+        # this does the restarting part ye
         actions = [
+            # this just counts total games
             (lambda: dpg.set_value('total_games', f'total games: {total_games}'), 0),
-            (lambda: dpg.configure_item('farm_status', default_value='starting...', color=(187, 98, 110)), 4),
+
+            # waits before starting game
+            *( (lambda i=i: dpg.configure_item('farm_status', default_value=f'starting game in {dpg.get_value("wait_restart")-i}...', color=(187, 98, 110)), 1) for i in range(dpg.get_value('wait_restart')) ),
+
+            # spams through the results screen and chooese the same legend and starts game
+            (lambda: dpg.configure_item('farm_status', default_value='spamming through menu!', color=(207, 104, 225)), 0),
+            *( (lambda: keypress(hwnd, 'c'), 0) for _ in range(10) ),
+            *( (lambda i=i: dpg.configure_item('farm_status', default_value=f'waiting for game... {dpg.get_value("wait_gameload")-i}...', color=(187, 98, 110)), 1) for i in range(dpg.get_value('wait_gameload')) ),
+
+            # open menu, waits
+            (lambda: dpg.configure_item('farm_status', default_value='open esc menu', color=(207, 104, 225)), 0),
+            (lambda: keypress(hwnd, win32con.VK_ESCAPE, 2), dpg.get_value('wait_disconnect')),
+
+            # disconnect
+            (lambda: dpg.configure_item('farm_status', default_value='wait disconnect delay', color=(187, 98, 110)), dpg.get_value('wait_disconnect')),
+            (lambda: keypress(hwnd, win32con.VK_UP), 0),
             (lambda: keypress(hwnd, 'c'), 0),
-            (lambda: keypress(hwnd, 'c'), 0),
-            (lambda: keypress(hwnd, 'c'), 0),
-            (lambda: keypress(hwnd, 'c'), 0),
-            (lambda: keypress(hwnd, 'c'), 0),
-            (lambda: keypress(hwnd, 'c'), 0),
-            (lambda: keypress(hwnd, 'c'), 0),
-            (lambda: keypress(hwnd, 'c'), 0),
-            (lambda: keypress(hwnd, 'c'), 0),
-            (lambda: keypress(hwnd, 'c'), 0),
-            (lambda: dpg.configure_item('farm_status', default_value='waiting for game...', color=(187, 98, 110)), 15),
-            (lambda: keypress(hwnd, win32con.VK_ESCAPE, 2), 0.1),
-            (lambda: keypress(hwnd, win32con.VK_UP), 4),
+
+            # reconnect
+            *( (lambda i=i: dpg.configure_item('farm_status', default_value=f'reconnecting in {dpg.get_value("wait_reconnect")-i}...', color=(187, 98, 110)), 1) for i in range(dpg.get_value('wait_reconnect')) ),
+            (lambda: dpg.configure_item('farm_status', default_value='pressing...', color=(207, 104, 225)), 0),
             (lambda: keypress(hwnd, 'c', 3), 0)
         ]
 
@@ -67,7 +78,7 @@ class Timer:
             if not self.running:
                 break
             action()
-            if delay >= 1:
+            if delay >= 1: # i split this so you can stop after 1 second checks if you pressed the stop button or not :3
                 for _ in range(int(delay)):
                     if not self.running:
                         break
@@ -112,10 +123,28 @@ def update_aot():
 
 # button callbacks
 def start_callback():
-    timer.start(dpg.get_value('match_time'))
+    global hwnd
+    if hwnd:
+        timer.start(dpg.get_value('match_time'))
+    else:
+        hwnd = win32gui.FindWindow(None, 'Brawlhalla')
+        dpg.configure_item('farm_status', default_value='brawlhalla window not found', color=(187, 98, 110))
+
 def stop_callback():
     dpg.configure_item('farm_status', default_value='stopping...', color=(187, 98, 110))
     timer.stop()
+
+def timing_reset():
+    dpg.set_value('wait_restart', 4)
+    dpg.set_value('wait_gameload', 15)
+    dpg.set_value('wait_disconnect', 0.1)
+    dpg.set_value('wait_reconnect', 4)
+
+def beep_sound():
+    winsound.Beep(dpg.get_value('beep_frequency'), dpg.get_value('beep_duration'))
+def beep_reset():
+    dpg.set_value('beep_frequency', 500)
+    dpg.set_value('beep_duration', 72)
 
 # context thing
 dpg.create_context()
@@ -153,16 +182,54 @@ with dpg.window(tag='main'):
             with dpg.group(horizontal=True):
                 dpg.add_text('status:')
                 dpg.add_text('inactive', color=(100, 149, 238), tag='farm_status')
-    
+        
+        with dpg.tab(label='config'):
+            with dpg.collapsing_header(label='timings'):
+                dpg.add_text('game restart delay')
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text('duration to wait before spamming through the menu to start a game', wrap=260)
+                dpg.add_slider_int(label='seconds', min_value=0, max_value=30, default_value=4, tag="wait_restart")
+                dpg.add_spacer(height=2)
+                dpg.add_text('game load time')
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text('duration to wait for the game to start (waiting for the game to load and countdown)', wrap=260)
+                dpg.add_slider_int(label='seconds', min_value=5, max_value=30, default_value=15, tag="wait_gameload")
+                dpg.add_spacer(height=2)
+                dpg.add_text('disconnect delay')
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text('duration to wait before clicking the disconnect button after opening menu', wrap=260)
+                dpg.add_slider_float(label='seconds', min_value=0.1, max_value=1, default_value=0.1, tag="wait_disconnect")
+                dpg.add_spacer(height=2)
+                dpg.add_text('reconnect delay')
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text('duration to wait before attempting to reconnect', wrap=260)
+                dpg.add_slider_int(label='seconds', min_value=3, max_value=20, default_value=4, tag="wait_reconnect")
+                dpg.add_button(label='reset', callback=timing_reset)
+                dpg.add_spacer(height=2)
+            with dpg.collapsing_header(label='boop beep?'):
+                dpg.add_text('beep frequency')
+                dpg.add_slider_int(label='hz', min_value=100, max_value=2000, default_value=500, tag="beep_frequency")
+                dpg.add_text('beep duration')
+                dpg.add_slider_int(label='ms', min_value=10, max_value=1000, default_value=72, tag="beep_duration")
+                dpg.add_spacer(height=2)
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label='beep', callback=beep_sound)
+                    dpg.add_button(label='reset', callback=beep_reset)
+
         with dpg.tab(label='help'):
             with dpg.collapsing_header(label='instructions',default_open=True):
                 dpg.add_text('this script is for super dummies')
                 dpg.add_spacer(height=2)
+                dpg.add_text('GAME RULE')
                 dpg.add_text('create a private custom lobby', bullet=True)
                 dpg.add_text('game mode: crew battle', bullet=True)
                 dpg.add_text('stocks: 99', bullet=True)
                 dpg.add_text('match time: 25 minutes', bullet=True)
-                dpg.add_text('map: random', bullet=True)
+                dpg.add_text('mapset: (tournament) 1v1', bullet=True)
+                dpg.add_text('max players: 2', bullet=True)
+                dpg.add_spacer(height=2)
+                dpg.add_text('LOBBY')
+                dpg.add_text('map selection: random', bullet=True)
                 dpg.add_text('disable friend/clan join', bullet=True)
                 dpg.add_text('choose legend, dont start game', bullet=True)
                 dpg.add_text('press start button', bullet=True)
