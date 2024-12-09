@@ -1,4 +1,5 @@
 import os
+import ast
 import time
 import threading
 import random
@@ -6,11 +7,13 @@ import winsound
 import win32api
 import win32con
 import win32gui
+import webbrowser
 import dearpygui.dearpygui as dpg
 
 # global vars cuz im lazy yippee
-hwnd = win32gui.FindWindow(None, 'Brawlhalla')
-total_games = 0
+HWND = win32gui.FindWindow(None, 'Brawlhalla')
+TOTAL_GAMES = 0
+TOTAL_EXP = 0
 
 # timer thingy
 class Timer:
@@ -31,9 +34,9 @@ class Timer:
         self._timer_thread.start()
 
     def _run(self):
-        global total_games
+        global TOTAL_GAMES, TOTAL_EXP
         while self.running:
-            self.start_sequence()
+            self.key_sequence(['wait_restart', 'spam_menu', 'open_menu', 'disconnect', 'reconnect'])
             while self.remaining_time > 0 and self.running:
                 mins, secs = divmod(self.remaining_time, 60)
                 dpg.configure_item('farm_status', default_value=f'active ({mins}:{secs:02})', color=(207, 104, 225))
@@ -43,10 +46,16 @@ class Timer:
             if self.remaining_time == 0 and self.running:
                 if dpg.get_value('timer_sound'):
                     winsound.Beep(dpg.get_value('beep_frequency'), dpg.get_value('beep_duration'))
-                total_games += 1
-                dpg.set_value('total_games', f'total games: {total_games}')
+                TOTAL_EXP += calculate_exp((self.initial_time/60))
+                dpg.set_value('total_exp', f'exp: {TOTAL_EXP}')
+                if dpg.get_value('exp_detect') and TOTAL_EXP >= 13000:
+                    dpg.configure_item('farm_status', default_value='exp rate limit...', color=(187, 98, 110))
+                    self.stop
+                    return
+                TOTAL_GAMES += 1
+                dpg.set_value('total_games', f'games: {TOTAL_GAMES},')
                 self.remaining_time = self.initial_time
-                if dpg.get_value('max_games') and total_games >= dpg.get_value('max_games_amount'):
+                if dpg.get_value('max_games') and TOTAL_GAMES >= dpg.get_value('max_games_amount'):
                     dpg.configure_item('farm_status', default_value='max games reached...', color=(187, 98, 110))
                     self.stop
                     return
@@ -59,30 +68,41 @@ class Timer:
                         return
 
     # this does the restarting part ye
-    def start_sequence(self):
-        actions = [
+    def key_sequence(self, sequences):
+        action_map = {
             # waits before starting game
-            *( (lambda i=i: dpg.configure_item('farm_status', default_value=f'starting game in {dpg.get_value("wait_restart")-i}...', color=(187, 98, 110)), 1) for i in range(dpg.get_value('wait_restart')) ),
-
+            'wait_restart': [
+                *( (lambda i=i: dpg.configure_item('farm_status', default_value=f'starting game in {dpg.get_value("wait_restart")-i}...', color=(187, 98, 110)), 1) for i in range(dpg.get_value('wait_restart')) ),
+            ],
             # spams through the results screen and chooese the same legend and starts game
-            (lambda: dpg.configure_item('farm_status', default_value='spamming through menu!', color=(207, 104, 225)), 0),
-            *( (lambda: keypress(hwnd, 'c'), 0) for _ in range(10) ),
-            *( (lambda i=i: dpg.configure_item('farm_status', default_value=f'waiting for game... {dpg.get_value("wait_gameload")-i}...', color=(187, 98, 110)), 1) for i in range(dpg.get_value('wait_gameload')) ),
-
+            'spam_menu': [
+                (lambda: dpg.configure_item('farm_status', default_value='spamming through menu!', color=(207, 104, 225)), 0),
+                *( (lambda: keypress(HWND, 'c'), 0) for _ in range(dpg.get_value('start_spam')) ),
+                *( (lambda i=i: dpg.configure_item('farm_status', default_value=f'waiting for game {dpg.get_value("wait_gameload")-i}...', color=(187, 98, 110)), 1) for i in range(dpg.get_value('wait_gameload')) ),
+            ],
             # open menu, waits
-            (lambda: dpg.configure_item('farm_status', default_value='open esc menu', color=(207, 104, 225)), 0),
-            (lambda: keypress(hwnd, win32con.VK_ESCAPE, 2), dpg.get_value('wait_disconnect')),
+            'open_menu': [
+                (lambda: dpg.configure_item('farm_status', default_value='open esc menu', color=(207, 104, 225)), 0),
+                (lambda: keypress(HWND, win32con.VK_ESCAPE, 2), dpg.get_value('wait_disconnect')),
+            ],
+            # disconnects from game
+            'disconnect': [
+                (lambda: dpg.configure_item('farm_status', default_value='wait disconnect delay', color=(187, 98, 110)), dpg.get_value('wait_disconnect')),
+                (lambda: keypress(HWND, win32con.VK_UP), 0),
+                (lambda: keypress(HWND, 'c'), 0),
+            ],
+            # reconnects to game
+            'reconnect': [
+                *( (lambda i=i: dpg.configure_item('farm_status', default_value=f'reconnecting in {dpg.get_value("wait_reconnect")-i}...', color=(187, 98, 110)), 1) for i in range(dpg.get_value('wait_reconnect')) ),
+                (lambda: dpg.configure_item('farm_status', default_value='pressing...', color=(207, 104, 225)), 0),
+                (lambda: keypress(HWND, 'c', 2), 0)
+            ]
+        }
 
-            # disconnect
-            (lambda: dpg.configure_item('farm_status', default_value='wait disconnect delay', color=(187, 98, 110)), dpg.get_value('wait_disconnect')),
-            (lambda: keypress(hwnd, win32con.VK_UP), 0),
-            (lambda: keypress(hwnd, 'c'), 0),
-
-            # reconnect
-            *( (lambda i=i: dpg.configure_item('farm_status', default_value=f'reconnecting in {dpg.get_value("wait_reconnect")-i}...', color=(187, 98, 110)), 1) for i in range(dpg.get_value('wait_reconnect')) ),
-            (lambda: dpg.configure_item('farm_status', default_value='pressing...', color=(207, 104, 225)), 0),
-            (lambda: keypress(hwnd, 'c', 3), 0)
-        ]
+        actions = []
+        for sequence in sequences:
+            if sequence in action_map:
+                actions.extend(action_map[sequence])
 
         for action, delay in actions:
             if not self.running:
@@ -102,6 +122,7 @@ class Timer:
             self._timer_thread.join()
         dpg.configure_item('farm_status', default_value='inactive', color=(100, 149, 238))
 
+# keypress simulation
 def keypress(hwnd, key, times=1):
     if isinstance(key, str):
         k = win32api.VkKeyScan(key)
@@ -114,13 +135,21 @@ def keypress(hwnd, key, times=1):
         win32api.SendMessage(hwnd, win32con.WM_KEYUP, k, 0)
         time.sleep(random.uniform(0.15, 0.19))
 
+# exp calculate
+def calculate_exp(time):
+    return (time / 25) * 1000
+
 # set timer
 timer = Timer()
 
+# dpg stuff
+def _hyperlink(text, address):
+    b = dpg.add_button(label=text, callback=lambda:webbrowser.open(address))
+    dpg.bind_item_theme(b, "__hyperlinkTheme")
+
 # calculate exp on slider
 def update_exp():
-    minutes = dpg.get_value('match_time')
-    estimated_exp = (minutes / 25) * 1000
+    estimated_exp = calculate_exp(dpg.get_value('match_time'))
     dpg.set_value('estimated_exp', f'estimated exp: {int(estimated_exp)}')
 
 # always on top check thing
@@ -129,31 +158,49 @@ def update_aot():
 
 # button callbacks
 def start_callback():
-    global hwnd
-    if hwnd:
+    global HWND
+    HWND = win32gui.FindWindow(None, 'Brawlhalla')
+    if HWND:
         timer.start(dpg.get_value('match_time'))
     else:
-        hwnd = win32gui.FindWindow(None, 'Brawlhalla')
         dpg.configure_item('farm_status', default_value='brawlhalla window not found', color=(187, 98, 110))
 
 def stop_callback():
     dpg.configure_item('farm_status', default_value='stopping...', color=(187, 98, 110))
     timer.stop()
 
+def oops_callback():
+    timer.key_sequence(['open_menu', 'disconnect', 'reconnect'])
+
+def toggle_callback():
+    global HWND
+    HWND = win32gui.FindWindow(None, 'Brawlhalla')
+    if HWND:
+        if win32gui.IsWindowVisible(HWND):
+            win32gui.ShowWindow(HWND, win32con.SW_HIDE)
+            dpg.configure_item('farm_status', default_value='brawlhalla window hidden', color=(187, 98, 110))
+        else:
+            win32gui.ShowWindow(HWND, win32con.SW_SHOW)
+            dpg.configure_item('farm_status', default_value='brawlhalla window shown', color=(100, 149, 238))
+    else:
+        dpg.configure_item('farm_status', default_value='brawlhalla window not found', color=(187, 98, 110))
+
 def config_read():
     config = {}
     if not os.path.exists('config.ini'):
         config = {
             'match_time': 25,
-            'timer_sound': 0,
-            'always_on_top': 0,
+            'timer_sound': False,
+            'always_on_top': False,
+            'game_start_spam': 10,
             'game_restart_delay': 4,
             'game_load_time': 15,
             'disconnect_delay': 0.1,
             'reconnect_delay': 4,
             'beep_frequency': 500,
             'beep_duration': 72,
-            'max_games': 0,
+            'exp_detect': False,
+            'max_games': False,
             'max_games_amount': 16
         }
         with open('config.ini', 'w') as c:
@@ -163,7 +210,10 @@ def config_read():
         lines = c.readlines()
         for line in lines:
             key, value = line.strip().split('=')
-            config[key] = value
+            try:
+                config[key] = ast.literal_eval(value)
+            except (ValueError, SyntaxError):
+                config[key] = value
     return config
 
 def config_write():
@@ -171,12 +221,14 @@ def config_write():
         'match_time': dpg.get_value('match_time'),
         'timer_sound': dpg.get_value('timer_sound'),
         'always_on_top': dpg.get_value('always_on_top'),
+        'game_start_spam': dpg.get_value('start_spam'),
         'game_restart_delay': dpg.get_value('wait_restart'),
         'game_load_time': dpg.get_value('wait_gameload'),
         'disconnect_delay': dpg.get_value('wait_disconnect'),
         'reconnect_delay': dpg.get_value('wait_reconnect'),
         'beep_frequency': dpg.get_value('beep_frequency'),
         'beep_duration': dpg.get_value('beep_duration'),
+        'exp_detect': dpg.get_value('exp_detect'),
         'max_games': dpg.get_value('max_games'),
         'max_games_amount': dpg.get_value('max_games_amount')
     }
@@ -185,6 +237,7 @@ def config_write():
             c.write(f'{key}={value}\n')
 
 def timing_reset():
+    dpg.set_value('game_start_spam', 10)
     dpg.set_value('wait_restart', 4)
     dpg.set_value('wait_gameload', 15)
     dpg.set_value('wait_disconnect', 0.1)
@@ -198,6 +251,13 @@ def beep_reset():
 
 # context thing
 dpg.create_context()
+
+with dpg.theme(tag="__hyperlinkTheme"):
+    with dpg.theme_component(dpg.mvButton):
+        dpg.add_theme_color(dpg.mvThemeCol_Button, [0, 0, 0, 0])
+        dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, [0, 0, 0, 0])
+        dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, [29, 151, 236, 25])
+        dpg.add_theme_color(dpg.mvThemeCol_Text, [100, 149, 238])
 
 # make window
 with dpg.window(tag='main'):
@@ -227,15 +287,30 @@ with dpg.window(tag='main'):
                 dpg.add_button(label='stop', callback=stop_callback)
                 with dpg.tooltip(dpg.last_item()):
                     dpg.add_text('stops script, resets timer')
+                dpg.add_button(label='oops', callback=oops_callback)
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text('disconnects and reconnects again')
+                dpg.add_button(label='toggle', callback=toggle_callback)
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text('hides or show brawlhalla window')
             dpg.add_spacer(height=2)
 
-            dpg.add_text(f'total games: {total_games}', tag='total_games')
+            with dpg.group(horizontal=True):
+                dpg.add_text(f'games: {TOTAL_GAMES},', tag='total_games')
+                dpg.add_text(f'exp: {TOTAL_EXP}', tag='total_exp')
+
             with dpg.group(horizontal=True):
                 dpg.add_text('status:')
                 dpg.add_text('inactive', color=(100, 149, 238), tag='farm_status')
 
         with dpg.tab(label='config'):
+
+            # timings collapse
             with dpg.collapsing_header(label='timings'):
+                dpg.add_text('spam amount')
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text('amount to press when spamming through menu', wrap=260)
+                dpg.add_slider_int(label='presses', min_value=0, max_value=30, default_value=int(config['game_start_spam']), tag='start_spam'),
                 dpg.add_text('game restart delay')
                 with dpg.tooltip(dpg.last_item()):
                     dpg.add_text('duration to wait before spamming through the menu to start a game', wrap=260)
@@ -257,6 +332,8 @@ with dpg.window(tag='main'):
                 dpg.add_slider_int(label='seconds', min_value=3, max_value=20, default_value=int(config['reconnect_delay']), tag='wait_reconnect')
                 dpg.add_button(label='reset', callback=timing_reset)
                 dpg.add_spacer(height=2)
+
+            # beep sound collapse
             with dpg.collapsing_header(label='boop beep?'):
                 dpg.add_text('beep frequency')
                 dpg.add_slider_int(label='hz', min_value=100, max_value=2000, default_value=int(config['beep_frequency']), tag='beep_frequency')
@@ -266,13 +343,21 @@ with dpg.window(tag='main'):
                 with dpg.group(horizontal=True):
                     dpg.add_button(label='beep', callback=beep_sound)
                     dpg.add_button(label='reset', callback=beep_reset)
+
+            # other collapse
             with dpg.collapsing_header(label='other'):
                 with dpg.group(horizontal=True):
-                    dpg.add_checkbox(label='stop at', tag='stop_farm')
+                    dpg.add_checkbox(label='stop at', tag='stop_farm', enabled=False)
                     with dpg.tooltip(dpg.last_item()):
-                        dpg.add_text('stops at set time', wrap=260)
-                local_time = time.localtime()
-                dpg.add_time_picker(default_value={'hour': local_time.tm_hour+3, 'min': local_time.tm_min, 'sec': 0}, tag='stop_farm_time')
+                        dpg.add_text('stops at set time (buggy, disabled for now)', wrap=260)
+                    local_time = time.localtime()
+                    dpg.add_time_picker(default_value={'hour': local_time.tm_hour+3, 'min': local_time.tm_min, 'sec': 0}, tag='stop_farm_time')
+
+                dpg.add_spacer(height=2)
+                dpg.add_checkbox(label='exp rate limit detection', tag='exp_detect', default_value=bool(config['exp_detect']))
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text('stops farming after reaching 13000 exp', wrap=260)
+
                 dpg.add_spacer(height=2)
                 dpg.add_checkbox(label='max games', tag='max_games', default_value=bool(config['max_games']))
                 with dpg.tooltip(dpg.last_item()):
@@ -316,12 +401,16 @@ with dpg.window(tag='main'):
             with dpg.collapsing_header(label='faq'):
                 with dpg.tree_node(label='why crew battle?'):
                     dpg.add_text('because it has 25 minute game option and the less time you spend in game menus, the more exp youre gonna get (i think lol)', wrap=0)
-                    dpg.add_text('- me 05/17/2024', color=(100, 149, 238), user_data='https://discord.com/channels/829496409681297409/1240709211642527824/1240710940140503170')
+                    _hyperlink('- me 05/17/2024', 'https://discord.com/channels/829496409681297409/1240709211642527824/1240710940140503170')
                     dpg.add_text('xp and gold requires active participation and different modes calculate participation differently so bot is too dumb for ffa basically, because ffa requires actually doing damage and kills', wrap=0)
-                    dpg.add_text('- sovamorco 10/08/2023', color=(100, 149, 238), user_data='https://discord.com/channels/829496409681297409/829503904190431273/1160557662145097898')
+                    _hyperlink('- sovamorco 10/08/2023', 'https://discord.com/channels/829496409681297409/829503904190431273/1160557662145097898')
+                with dpg.tree_node(label='exp limit'):
+                    dpg.add_text('Around 5 hours or once you earn around 13000 XP, you have to stop farming for about 45-50 minutes to reset the XP limit.', wrap=0)
+                    _hyperlink('- jeffriesuave 10/16/2023', 'https://discord.com/channels/829496409681297409/829503904190431273/1163246039197831198')
+
 
 # setup and start
-dpg.create_viewport(title='simple bhbot', width=300, height=200)
+dpg.create_viewport(title='simple bhbot 08-31', width=300, height=200)
 dpg.set_viewport_always_top(dpg.get_value('always_on_top'))
 dpg.setup_dearpygui()
 dpg.show_viewport()
