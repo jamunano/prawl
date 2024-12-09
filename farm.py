@@ -435,10 +435,17 @@ def oops_callback():
         timer.keyseq.action(sequence, lambda: timer.running)
         timer.pause()
 
-def toggle_callback():
+def toggle_callback(toggle=None):
     global HWND
     if brawlhalla_running():
-        if win32gui.IsWindowVisible(HWND):
+        if toggle == 'hide':
+            hide_window = True
+        elif toggle == 'show':
+            hide_window = False
+        else:
+            hide_window = win32gui.IsWindowVisible(HWND)
+
+        if hide_window:
             win32gui.ShowWindow(HWND, win32con.SW_HIDE)
             dpg.configure_item('farm_status', default_value='brawlhalla window hidden', color=(187, 98, 110))
             dpg.configure_item('toggle_button_label', default_value='show brawlhalla window')
@@ -681,10 +688,10 @@ def create_gui(config):
                     dpg.add_checkbox(label='launch brawlhalla on script start', tag='auto_launch', default_value=bool(config['auto_launch']))
                     with dpg.tooltip(dpg.last_item()):
                         dpg.add_text('automatically starts brawlhalla (if not running already) when running this script', wrap=260)
-                    dpg.add_checkbox(label='exp rate limit detection', tag='exp_detect', default_value=bool(config['exp_detect']))
+                    dpg.add_checkbox(label='rate limit detection', tag='exp_detect', default_value=bool(config['exp_detect']))
                     with dpg.tooltip(dpg.last_item()):
                         dpg.add_text('stops farming after reaching 13000 exp', wrap=260)
-                    dpg.add_checkbox(label='auto wait', tag='exp_wait', default_value=bool(config['exp_wait']))
+                    dpg.add_checkbox(label='rate limit auto wait', tag='exp_wait', default_value=bool(config['exp_wait']))
                     with dpg.tooltip(dpg.last_item()):
                         dpg.add_text('automatically starts farming after waiting for rate limit to reset', wrap=260)
                     with dpg.group(horizontal=True):
@@ -759,7 +766,7 @@ if __name__ == '__main__':
 
     # setup and start gui
     create_gui(config)
-    dpg.create_viewport(title='simple bhbot 11-25', width=300, height=200)
+    dpg.create_viewport(title='farm.py 12-09', width=300, height=200)
     dpg.set_viewport_always_top(dpg.get_value('always_on_top'))
     dpg.setup_dearpygui()
     dpg.show_viewport()
@@ -768,4 +775,6 @@ if __name__ == '__main__':
 
     # saves any changes before closing
     config_write()
+    # show brawlhalla window if its hidden
+    toggle_callback('show')
     dpg.destroy_context()
