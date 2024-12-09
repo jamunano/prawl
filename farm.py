@@ -8,6 +8,7 @@ import win32api
 import win32con
 import win32gui
 import webbrowser
+import subprocess
 import dearpygui.dearpygui as dpg
 
 # global vars cuz im lazy yippee
@@ -103,7 +104,7 @@ class Timer:
             # open menu, waits
             'open_menu': [
                 (lambda: dpg.configure_item('farm_status', default_value='open esc menu', color=(207, 104, 225)), 0),
-                (lambda: keypress(HWND, win32con.VK_ESCAPE, 2), dpg.get_value('wait_disconnect')),
+                (lambda: keypress(HWND, win32con.VK_ESCAPE, dpg.get_value('esc_presses')), dpg.get_value('wait_disconnect')),
             ],
             # disconnects from game
             'disconnect': [
@@ -170,11 +171,15 @@ def update_exp():
 def update_aot():
     dpg.set_viewport_always_top(dpg.get_value('always_on_top'))
 
-# button callbacks
-def start_callback():
+# checks if brawl is running lol
+def brawlhalla_running():
     global HWND
     HWND = win32gui.FindWindow(None, 'Brawlhalla')
-    if HWND:
+    return True if HWND else False
+
+# button callbacks
+def start_callback():
+    if brawlhalla_running():
         timer.start(dpg.get_value('match_time'))
     else:
         dpg.configure_item('farm_status', default_value='brawlhalla window not found', color=(187, 98, 110))
@@ -189,8 +194,7 @@ def oops_callback():
 
 def toggle_callback():
     global HWND
-    HWND = win32gui.FindWindow(None, 'Brawlhalla')
-    if HWND:
+    if brawlhalla_running():
         if win32gui.IsWindowVisible(HWND):
             win32gui.ShowWindow(HWND, win32con.SW_HIDE)
             dpg.configure_item('farm_status', default_value='brawlhalla window hidden', color=(187, 98, 110))
@@ -204,6 +208,14 @@ def toggle_callback():
     else:
         dpg.configure_item('farm_status', default_value='brawlhalla window not found', color=(187, 98, 110))
 
+def launch_callback():
+    if brawlhalla_running():
+        dpg.configure_item('farm_status', default_value='already running', color=(187, 98, 110))
+    else:
+        subprocess.run('cmd /c start steam://rungameid/291550')
+        dpg.configure_item('farm_status', default_value='starting brawlhalla...', color=(100, 149, 238))
+
+# configuration thingies
 def config_read():
     default_config = {
         'match_time': 25,
@@ -212,6 +224,7 @@ def config_read():
         'game_start_spam': 10,
         'game_restart_delay': 4,
         'game_load_time': 15,
+        'esc_presses': 2,
         'disconnect_delay': 0.1,
         'reconnect_delay': 4,
         'beep_frequency': 500,
@@ -219,7 +232,8 @@ def config_read():
         'exp_detect': False,
         'exp_wait': False,
         'max_games': False,
-        'max_games_amount': 16
+        'max_games_amount': 16,
+        'auto_launch': False
     }
 
     config = {}
@@ -270,6 +284,7 @@ def config_write():
         'game_start_spam': dpg.get_value('start_spam'),
         'game_restart_delay': dpg.get_value('wait_restart'),
         'game_load_time': dpg.get_value('wait_gameload'),
+        'esc_presses': dpg.get_value('esc_presses'),
         'disconnect_delay': dpg.get_value('wait_disconnect'),
         'reconnect_delay': dpg.get_value('wait_reconnect'),
         'beep_frequency': dpg.get_value('beep_frequency'),
@@ -277,7 +292,8 @@ def config_write():
         'exp_detect': dpg.get_value('exp_detect'),
         'exp_wait': dpg.get_value('exp_wait'),
         'max_games': dpg.get_value('max_games'),
-        'max_games_amount': dpg.get_value('max_games_amount')
+        'max_games_amount': dpg.get_value('max_games_amount'),
+        'auto_launch': dpg.get_value('auto_launch')
     }
     with open('config.ini', 'w') as c:
         for key, value in config.items():
@@ -340,7 +356,9 @@ with dpg.window(tag='main'):
                 dpg.add_button(label='hide', tag='toggle_button', callback=toggle_callback)
                 with dpg.tooltip(dpg.last_item()):
                     dpg.add_text('hide brawlhalla window', tag='toggle_button_label')
-            dpg.add_spacer(height=2)
+                dpg.add_button(label='launch', callback=launch_callback)
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text('starts brawlhalla from steam')
 
             with dpg.group(horizontal=True):
                 dpg.add_text(f'games: {TOTAL_GAMES},', tag='total_games')
@@ -367,6 +385,12 @@ with dpg.window(tag='main'):
                 with dpg.tooltip(dpg.last_item()):
                     dpg.add_text('duration to wait for the game to start (waiting for the game to load and countdown)', wrap=260)
                 dpg.add_slider_int(label='seconds', min_value=5, max_value=30, default_value=int(config['game_load_time']), tag='wait_gameload')
+
+                dpg.add_spacer(height=2)
+                dpg.add_text('esc presses')
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text('the amount of times to press the esc button to open the menu, default is 2 because it doesnt open the first press for some reason', wrap=260)
+                dpg.add_slider_int(label='times', min_value=1, max_value=6, default_value=int(config['esc_presses']), tag='esc_presses')
                 dpg.add_spacer(height=2)
                 dpg.add_text('disconnect delay')
                 with dpg.tooltip(dpg.last_item()):
@@ -393,20 +417,25 @@ with dpg.window(tag='main'):
 
             # other collapse
             with dpg.collapsing_header(label='other'):
+
+                dpg.add_spacer(height=2)
+                dpg.add_checkbox(label='launch brawlhalla on script start', tag='auto_launch', default_value=bool(config['auto_launch']))
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text('automatically starts brawlhalla (if not running already) when running this script', wrap=260)
+
                 dpg.add_checkbox(label='exp rate limit detection', tag='exp_detect', default_value=bool(config['exp_detect']))
                 with dpg.tooltip(dpg.last_item()):
                     dpg.add_text('stops farming after reaching 13000 exp', wrap=260)
 
-                dpg.add_spacer(height=2)
                 dpg.add_checkbox(label='auto wait', tag='exp_wait', default_value=bool(config['exp_wait']))
                 with dpg.tooltip(dpg.last_item()):
                     dpg.add_text('automatically starts farming after waiting for rate limit to reset', wrap=260)
 
-                dpg.add_spacer(height=2)
-                dpg.add_checkbox(label='max games', tag='max_games', default_value=bool(config['max_games']))
-                with dpg.tooltip(dpg.last_item()):
-                    dpg.add_text('stops after playing x matches', wrap=260)
-                dpg.add_slider_int(label='games', min_value=1, max_value=99, default_value=int(config['max_games_amount']), tag='max_games_amount')
+                with dpg.group(horizontal=True):
+                    dpg.add_checkbox(label='', tag='max_games', default_value=bool(config['max_games']))
+                    with dpg.tooltip(dpg.last_item()):
+                        dpg.add_text('stops after playing x matches', wrap=260)
+                    dpg.add_slider_int(label='games', min_value=1, max_value=99, default_value=int(config['max_games_amount']), tag='max_games_amount')
 
         with dpg.tab(label='help'):
             with dpg.collapsing_header(label='instructions',default_open=True):
@@ -451,10 +480,13 @@ with dpg.window(tag='main'):
                 with dpg.tree_node(label='exp rate limit'):
                     dpg.add_text('Around 5 hours or once you earn around 13000 XP, you have to stop farming for about 45-50 minutes to reset the XP limit.', wrap=0)
                     _hyperlink('- jeffriesuave 10/16/2023', 'https://discord.com/channels/829496409681297409/829503904190431273/1163246039197831198')
-
+    
+    # auto launch
+    if config['auto_launch']:
+        launch_callback()
 
 # setup and start
-dpg.create_viewport(title='simple bhbot 09-02', width=300, height=200)
+dpg.create_viewport(title='simple bhbot 11-04', width=300, height=200)
 dpg.set_viewport_always_top(dpg.get_value('always_on_top'))
 dpg.setup_dearpygui()
 dpg.show_viewport()
