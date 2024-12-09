@@ -1,4 +1,4 @@
-gold and exp farming timer script for brawlhalla patch 9.01 [(download)](https://github.com/phruut/prawl/releases/lateset)\
+gold and exp farming timer script for brawlhalla patch 9.01 [(download)](https://github.com/phruut/prawl/releases/latest)\
 please see the [wiki](https://github.com/phruut/prawl/wiki) for more information about the script\
 discord server: https://discord.gg/2HDmuqqq9p
 
